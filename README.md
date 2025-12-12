@@ -1,2 +1,2 @@
 # Herald
-Herald DSP Core - FFT, CORDIC, and FIR processing for Tiny Tapeout
+Herald is a math co-processor for Arduino UNOs with CORDIC and MAC support 
