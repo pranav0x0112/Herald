@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+env/
+
+# Build artifacts
+build/
+*.o
+*.a
+*.so
+*.bo
+
+# Bluespec build outputs
+*.cxx
+*.h
+*.ba
+*.use
+*.sched
+*.log
+
+# Simulation
+sim_build/
+*.vcd
+*.fst
+*.vvp
+*.out
+
+# Test results
+results.xml
+*.wlf
+*.vstf
+transcript
+
+# Editor/IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
