@@ -16,7 +16,6 @@ Herald is a custom silicon math accelerator designed to plug into Arduino and ha
 - Arduino sends operation code + data over SPI
 - Herald computes in hardware (CORDIC + MAC units)
 
-![Herald_High_Level_Block_Diagram](docs/images/Herald_High_Level_Block_Diagram.png)
 
 ## What Herald Implements
 
