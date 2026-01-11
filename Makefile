@@ -33,12 +33,29 @@ cordic_test: dirs
 	@echo "[SIM] Running..."
 	@cd $(BSIM_DIR) && ./cordic_tb
 
+# MAC test
+mac_test: dirs
+	@echo "[BSC] Compiling MAC testbench..."
+	$(BSC) $(BSC_FLAGS) $(BSC_SIM_FLAGS) $(BSC_PATH) -g mkMAC_TB -u $(TB_DIR)/MAC_TB.bsv
+	$(BSC) $(BSC_FLAGS) $(BSC_SIM_FLAGS) $(BSC_PATH) -e mkMAC_TB -o $(BSIM_DIR)/mac_tb
+	@echo "[SIM] Running..."
+	@cd $(BSIM_DIR) && ./mac_tb
+
 # Generate Verilog
 cordic_verilog: dirs
 	@echo "[BSC] Generating Verilog..."
 	$(BSC) $(BSC_FLAGS) $(BSC_VERILOG_FLAGS) $(BSC_PATH) -g mkCORDIC $(SRC_DIR)/CORDIC.bsv
 	$(BSC) $(BSC_FLAGS) $(BSC_VERILOG_FLAGS) $(BSC_PATH) -g mkCORDICHighLevel $(SRC_DIR)/CORDIC.bsv
 	@echo "[INFO] Verilog in $(VERILOG_DIR)/"
+
+# Generate MAC Verilog
+mac_verilog: dirs
+	@echo "[BSC] Generating MAC Verilog..."
+	$(BSC) $(BSC_FLAGS) $(BSC_VERILOG_FLAGS) $(BSC_PATH) -g mkMAC $(SRC_DIR)/MAC.bsv
+	@echo "[INFO] Verilog in $(VERILOG_DIR)/"
+
+# Generate all Verilog
+verilog: cordic_verilog mac_verilog
 
 # Syntax check
 check: dirs
@@ -47,7 +64,7 @@ check: dirs
 	@echo "[OK] Syntax check passed"
 
 # Run all tests
-test: cordic_test
+test: cordic_test mac_test
 
 # Clean
 clean:

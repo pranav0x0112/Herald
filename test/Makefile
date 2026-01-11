@@ -1,17 +1,22 @@
-# Makefile for cocotb CORDIC testbench
+# Makefile for cocotb testbenches
 
 # Defaults
 SIM ?= icarus
 TOPLEVEL_LANG ?= verilog
 
-# Verilog sources
-VERILOG_SOURCES = $(PWD)/../build/verilog/mkCORDICHighLevel.v $(PWD)/../build/verilog/mkCORDIC.v
+# Test target selection
+TEST ?= cordic
 
-# Toplevel module
-TOPLEVEL = mkCORDICHighLevel
-
-# Python test module
-MODULE = test_cordic
+# Conditional configuration based on test target
+ifeq ($(TEST),cordic)
+    VERILOG_SOURCES = $(PWD)/../build/verilog/mkCORDICHighLevel.v
+    TOPLEVEL = mkCORDICHighLevel
+    MODULE = test_cordic
+else ifeq ($(TEST),mac)
+    VERILOG_SOURCES = $(PWD)/../build/verilog/mkMAC.v
+    TOPLEVEL = mkMAC
+    MODULE = test_mac
+endif
 
 # Waveform dump
 WAVES ?= 1
@@ -21,6 +26,15 @@ endif
 
 # Include cocotb makefiles
 include $(shell cocotb-config --makefiles)/Makefile.sim
+
+# Convenience targets
+.PHONY: cordic mac
+
+cordic:
+	$(MAKE) TEST=cordic
+
+mac:
+	$(MAKE) TEST=mac
 
 # Clean target
 clean::
