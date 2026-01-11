@@ -151,7 +151,7 @@ module mkCORDIC_TB(Empty);
         endaction
         
         $display("========================================");
-        $display("Completed: %d tests passed", pass_count);
+        $display("Completed: %d tests passed, %d failed", pass_count, fail_count);
         $display("========================================");
         $finish(0);
     endseq;
