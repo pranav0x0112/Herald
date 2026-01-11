@@ -23,8 +23,7 @@ typedef enum {
     OP_SINCOS,    
     OP_ATAN2,     
     OP_SQRT,      
-    OP_MAGNITUDE, 
-    OP_MULTIPLY   
+    OP_MAGNITUDE
 } CORDICOp deriving (Bits, Eq, FShow);
 
 typedef struct {
@@ -186,12 +185,10 @@ interface CORDICHighLevelIfc;
     method Action sin_cos(Fixed32 angle);
     method Action atan2(Fixed32 y, Fixed32 x);
     method Action sqrt_magnitude(Fixed32 x, Fixed32 y);
-    method Action multiply(Fixed32 a, Fixed32 b);
     
     method ActionValue#(Tuple2#(Fixed32, Fixed32)) get_sin_cos();
     method ActionValue#(Fixed32) get_atan2();
     method ActionValue#(Fixed32) get_sqrt();
-    method ActionValue#(Fixed32) get_multiply();
     
     method Bool busy();
 endinterface
@@ -229,13 +226,6 @@ module mkCORDICHighLevel(CORDICHighLevelIfc);
         operation_pending <= True;
     endmethod
     
-    method Action multiply(Fixed32 a, Fixed32 b);
-        cordic.start(a, b, 0, MODE_ROTATION);
-        current_op <= OP_MULTIPLY;
-        result_ready <= False;
-        operation_pending <= True;
-    endmethod
-    
     method ActionValue#(Tuple2#(Fixed32, Fixed32)) get_sin_cos() 
             if (result_ready && current_op == OP_SINCOS);
         let res <- cordic.getResult();
@@ -255,13 +245,6 @@ module mkCORDICHighLevel(CORDICHighLevelIfc);
         let res <- cordic.getResult();
         result_ready <= False;
         return res.x;
-    endmethod
-    
-    method ActionValue#(Fixed32) get_multiply() 
-            if (result_ready && current_op == OP_MULTIPLY);
-        let res <- cordic.getResult();
-        result_ready <= False;
-        return res.y; 
     endmethod
     
     method Bool busy();

@@ -97,11 +97,9 @@ async def reset_dut(dut):
     dut.EN_sin_cos.value = 0
     dut.EN_atan2.value = 0
     dut.EN_sqrt_magnitude.value = 0
-    dut.EN_multiply.value = 0
     dut.EN_get_sin_cos.value = 0
     dut.EN_get_atan2.value = 0
     dut.EN_get_sqrt.value = 0
-    dut.EN_get_multiply.value = 0
     await ClockCycles(dut.CLK, 5)
     dut.RST_N.value = 1
     await ClockCycles(dut.CLK, 1)
