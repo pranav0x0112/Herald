@@ -16,6 +16,12 @@ else ifeq ($(TEST),mac)
     VERILOG_SOURCES = $(PWD)/../build/verilog/mkMAC.v
     TOPLEVEL = mkMAC
     MODULE = test_mac
+else ifeq ($(TEST),wrapper)
+    VERILOG_SOURCES = $(PWD)/../src/rtl/tt_um_herald.v \
+                      $(PWD)/../build/verilog/mkCORDICHighLevel.v \
+                      $(PWD)/../build/verilog/mkMAC.v
+    TOPLEVEL = tt_um_herald
+    MODULE = test_wrapper
 endif
 
 # Waveform dump
@@ -28,13 +34,16 @@ endif
 include $(shell cocotb-config --makefiles)/Makefile.sim
 
 # Convenience targets
-.PHONY: cordic mac
+.PHONY: cordic mac wrapper
 
 cordic:
 	$(MAKE) TEST=cordic
 
 mac:
 	$(MAKE) TEST=mac
+
+wrapper:
+	$(MAKE) TEST=wrapper
 
 # Clean target
 clean::
