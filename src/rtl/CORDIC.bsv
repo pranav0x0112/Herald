@@ -7,8 +7,8 @@ package CORDIC;
 import Vector::*;
 import FixedPoint::*;
 
-typedef Int#(16) Fixed16;  // 16-bit fixed point (Q8.8 format)
-typedef UInt#(4) IterCount; // Iteration counter (0-15) - reduced for area
+typedef Int#(24) Fixed24;  // 24-bit fixed point (Q12.12 format)
+typedef UInt#(5) IterCount; // Iteration counter (0-19) - 20 iterations for Q12.12
 
 typedef enum {
     MODE_ROTATION,     // Rotate vector by angle
@@ -26,65 +26,70 @@ typedef enum {
 } CORDICOp deriving (Bits, Eq, FShow);
 
 typedef struct {
-    Fixed16 x;   
-    Fixed16 y;        
-    Fixed16 z;      
+    Fixed24 x;   
+    Fixed24 y;        
+    Fixed24 z;      
     IterCount iter;   
     CORDICMode mode; 
     Bool valid;      
 } CORDICState deriving (Bits, Eq, FShow);
 
-// Pre-computed CORDIC rotation angles: atan(2^-i) in Q8.8 format
-// Reduced to 16 iterations for area savings
-function Vector#(16, Fixed16) rotationAngles();
-    Vector#(16, Fixed16) angles = newVector;
-    angles[0]  = 201;       // atan(2^0)  = 0.7854 rad (45°) in Q8.8
-    angles[1]  = 119;       // atan(2^-1) = 0.4636 rad
-    angles[2]  = 63;        // atan(2^-2) = 0.2450 rad
-    angles[3]  = 32;        // atan(2^-3) = 0.1244 rad
-    angles[4]  = 16;        // atan(2^-4) = 0.0624 rad
-    angles[5]  = 8;         // atan(2^-5) = 0.0312 rad
-    angles[6]  = 4;         // atan(2^-6) = 0.0156 rad
-    angles[7]  = 2;         // atan(2^-7) = 0.0078 rad
-    angles[8]  = 1;         // atan(2^-8) = 0.0039 rad
-    angles[9]  = 1;         // atan(2^-9) = 0.0020 rad (rounded)
-    angles[10] = 0;         // atan(2^-10) = 0.0010 rad (too small for Q8.8)
-    angles[11] = 0;         // Remaining angles too small for Q8.8
-    angles[12] = 0;
-    angles[13] = 0;
-    angles[14] = 0;
+// Pre-computed CORDIC rotation angles: atan(2^-i) in Q12.12 format
+// 20 iterations for 24-bit precision
+function Vector#(20, Fixed24) rotationAngles();
+    Vector#(20, Fixed24) angles = newVector;
+    angles[0]  = 3217;      // atan(2^0)  = 0.7854 rad (45°) in Q12.12
+    angles[1]  = 1901;      // atan(2^-1) = 0.4636 rad
+    angles[2]  = 1006;      // atan(2^-2) = 0.2450 rad
+    angles[3]  = 511;       // atan(2^-3) = 0.1244 rad
+    angles[4]  = 256;       // atan(2^-4) = 0.0624 rad
+    angles[5]  = 128;       // atan(2^-5) = 0.0312 rad
+    angles[6]  = 64;        // atan(2^-6) = 0.0156 rad
+    angles[7]  = 32;        // atan(2^-7) = 0.0078 rad
+    angles[8]  = 16;        // atan(2^-8) = 0.0039 rad
+    angles[9]  = 8;         // atan(2^-9) = 0.0020 rad
+    angles[10] = 4;         // atan(2^-10) = 0.0010 rad
+    angles[11] = 2;         // atan(2^-11) = 0.0005 rad
+    angles[12] = 1;         // atan(2^-12) = 0.0002 rad
+    angles[13] = 1;         // atan(2^-13) = 0.0001 rad (rounded)
+    angles[14] = 0;         // Remaining angles too small for Q12.12
     angles[15] = 0;
+    angles[16] = 0;
+    angles[17] = 0;
+    angles[18] = 0;
+    angles[19] = 0;
     return angles;
 endfunction
 
-function Vector#(16, Fixed16) hyperbolicAngles();
-    Vector#(16, Fixed16) angles = newVector;
-    // Hyperbolic angles in Q8.8 (scaled from Q32 values)
-    angles[0] = 16384; angles[1] = 8192; angles[2] = 4096;
-    angles[3] = 2048; angles[4] = 1024; angles[5] = 512;
-    angles[6] = 256; angles[7] = 128; angles[8] = 64;
-    angles[9] = 32; angles[10] = 16; angles[11] = 8;
-    angles[12] = 4; angles[13] = 2; angles[14] = 1;
-    angles[15] = 0;
+function Vector#(20, Fixed24) hyperbolicAngles();
+    Vector#(20, Fixed24) angles = newVector;
+    // Hyperbolic angles in Q12.12 (scaled from Q8.8 by ×16)
+    angles[0] = 262144; angles[1] = 131072; angles[2] = 65536;
+    angles[3] = 32768; angles[4] = 16384; angles[5] = 8192;
+    angles[6] = 4096; angles[7] = 2048; angles[8] = 1024;
+    angles[9] = 512; angles[10] = 256; angles[11] = 128;
+    angles[12] = 64; angles[13] = 32; angles[14] = 16;
+    angles[15] = 8; angles[16] = 4; angles[17] = 2;
+    angles[18] = 1; angles[19] = 0;
     return angles;
 endfunction
 
-// CORDIC gain compensation factors in Q8.8 format
+// CORDIC gain compensation factors in Q12.12 format
 // K = prod(sqrt(1 + 2^(-2i))) for circular rotations
-// After 16 iterations: K ≈ 1.6468 -> 1/K ≈ 0.6073
-Fixed16 kFactorRotation = 155;      // 1/K = 0.6073 in Q8.8 (155/256)
-Fixed16 kFactorHyperbolic = 0;      // Placeholder for hyperbolic
+// After 20 iterations: K ≈ 1.6468 -> 1/K ≈ 0.6073
+Fixed24 kFactorRotation = 2487;      // 1/K = 0.6073 in Q12.12 (2487/4096)
+Fixed24 kFactorHyperbolic = 0;      // Placeholder for hyperbolic
 
-function Fixed16 ashr(Fixed16 val, UInt#(4) shift_amt); // Arithmetic shift right
-    return val >> shift_amt;  // Int#(32) >> does arithmetic shift
+function Fixed24 ashr(Fixed24 val, UInt#(5) shift_amt); // Arithmetic shift right
+    return val >> shift_amt;  // Int#(24) >> does arithmetic shift
 endfunction
 
-function Fixed16 condNegate(Fixed16 val, Bool negate); // Conditional negate
+function Fixed24 condNegate(Fixed24 val, Bool negate); // Conditional negate
     return negate ? (~val + 1) : val;
 endfunction
 
 interface CORDICIfc;
-    method Action start(Fixed16 x_init, Fixed16 y_init, Fixed16 z_init, 
+    method Action start(Fixed24 x_init, Fixed24 y_init, Fixed24 z_init, 
                        CORDICMode mode);
     method ActionValue#(CORDICState) getResult();
     method Bool busy();
@@ -95,12 +100,12 @@ module mkCORDIC(CORDICIfc);
     Reg#(CORDICState) state <- mkReg(?);
     Reg#(Bool) busy_reg <- mkReg(False);
     
-    Vector#(16, Fixed16) rot_angles = rotationAngles();
-    Vector#(16, Fixed16) hyp_angles = hyperbolicAngles();
+    Vector#(20, Fixed24) rot_angles = rotationAngles();
+    Vector#(20, Fixed24) hyp_angles = hyperbolicAngles();
 
-    function CORDICState cordic_iteration(CORDICState s, UInt#(4) iter);
-        Fixed16 angle_lut;
-        Fixed16 x_new, y_new, z_new;
+    function CORDICState cordic_iteration(CORDICState s, UInt#(5) iter);
+        Fixed24 angle_lut;
+        Fixed24 x_new, y_new, z_new;
         Bool do_subtract;
 
         if (s.mode == MODE_HYPERBOLIC)
@@ -108,8 +113,8 @@ module mkCORDIC(CORDICIfc);
         else
             angle_lut = rot_angles[iter];
 
-        Fixed16 y_shifted = ashr(s.y, iter);
-        Fixed16 x_shifted = ashr(s.x, iter);
+        Fixed24 y_shifted = ashr(s.y, iter);
+        Fixed24 x_shifted = ashr(s.x, iter);
 
         Bool rotate_cw;  
         
@@ -129,7 +134,7 @@ module mkCORDIC(CORDICIfc);
         end
         
         IterCount next_iter = iter + 1;
-        Bool done = (iter == 15);  // Reduced to 16 iterations (0-15)
+        Bool done = (iter == 19);  // 20 iterations (0-19) for Q12.12
         return CORDICState {
             x: x_new,
             y: y_new,
@@ -147,7 +152,7 @@ module mkCORDIC(CORDICIfc);
             busy_reg <= False;
     endrule
     
-    method Action start(Fixed16 x_init, Fixed16 y_init, Fixed16 z_init, 
+    method Action start(Fixed24 x_init, Fixed24 y_init, Fixed24 z_init, 
                        CORDICMode mode);
         busy_reg <= True;
         state <= CORDICState {
@@ -171,13 +176,13 @@ module mkCORDIC(CORDICIfc);
 endmodule
 
 interface CORDICHighLevelIfc;
-    method Action sin_cos(Fixed16 angle);
-    method Action atan2(Fixed16 y, Fixed16 x);
-    method Action sqrt_magnitude(Fixed16 x, Fixed16 y);
+    method Action sin_cos(Fixed24 angle);
+    method Action atan2(Fixed24 y, Fixed24 x);
+    method Action sqrt_magnitude(Fixed24 x, Fixed24 y);
     
-    method ActionValue#(Tuple2#(Fixed16, Fixed16)) get_sin_cos();
-    method ActionValue#(Fixed16) get_atan2();
-    method ActionValue#(Fixed16) get_sqrt();
+    method ActionValue#(Tuple2#(Fixed24, Fixed24)) get_sin_cos();
+    method ActionValue#(Fixed24) get_atan2();
+    method ActionValue#(Fixed24) get_sqrt();
     
     method Bool busy();
 endinterface
@@ -194,42 +199,42 @@ module mkCORDICHighLevel(CORDICHighLevelIfc);
         operation_pending <= False;
     endrule
     
-    method Action sin_cos(Fixed16 angle);
+    method Action sin_cos(Fixed24 angle);
         cordic.start(kFactorRotation, 0, angle, MODE_ROTATION);
         current_op <= OP_SINCOS;
         result_ready <= False;
         operation_pending <= True;
     endmethod
     
-    method Action atan2(Fixed16 y, Fixed16 x);
+    method Action atan2(Fixed24 y, Fixed24 x);
         cordic.start(x, y, 0, MODE_VECTORING);
         current_op <= OP_ATAN2;
         result_ready <= False;
         operation_pending <= True;
     endmethod
     
-    method Action sqrt_magnitude(Fixed16 x, Fixed16 y);
+    method Action sqrt_magnitude(Fixed24 x, Fixed24 y);
         cordic.start(x, y, 0, MODE_VECTORING);
         current_op <= OP_SQRT;
         result_ready <= False;
         operation_pending <= True;
     endmethod
     
-    method ActionValue#(Tuple2#(Fixed16, Fixed16)) get_sin_cos() 
+    method ActionValue#(Tuple2#(Fixed24, Fixed24)) get_sin_cos() 
             if (result_ready && current_op == OP_SINCOS);
         let res <- cordic.getResult();
         result_ready <= False;
         return tuple2(res.y, res.x); 
     endmethod
     
-    method ActionValue#(Fixed16) get_atan2() 
+    method ActionValue#(Fixed24) get_atan2() 
             if (result_ready && current_op == OP_ATAN2);
         let res <- cordic.getResult();
         result_ready <= False;
         return res.z; 
     endmethod
     
-    method ActionValue#(Fixed16) get_sqrt() 
+    method ActionValue#(Fixed24) get_sqrt() 
             if (result_ready && current_op == OP_SQRT);
         let res <- cordic.getResult();
         result_ready <= False;
