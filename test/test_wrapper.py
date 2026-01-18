@@ -3,19 +3,19 @@ from cocotb.clock import Clock
 from cocotb.triggers import RisingEdge, Timer, ClockCycles
 
 def to_fixed(val):
-    """Convert float to Q8.8 fixed point"""
-    return int(val * 256) & 0xFFFF
+    """Convert float to Q12.12 fixed point"""
+    return int(val * 4096) & 0xFFFFFF
 
 def from_fixed(val):
-    """Convert Q8.8 fixed point to float"""
-    if val & 0x8000:
-        val = val - 0x10000
-    return val / 256.0
+    """Convert Q12.12 fixed point to float"""
+    if val & 0x800000:
+        val = val - 0x1000000
+    return val / 4096.0
 
-def to_signed_16(val):
-    """Convert unsigned 16-bit to signed"""
-    if val & 0x8000:
-        return val - 0x10000
+def to_signed_24(val):
+    """Convert unsigned 24-bit to signed"""
+    if val & 0x800000:
+        return val - 0x1000000
     return val
 
 async def reset_dut(dut):
@@ -48,24 +48,28 @@ async def read_byte(dut):
     await RisingEdge(dut.clk)
     return result
 
-async def write_16bit(dut, value):
-    """Write 16-bit value as 2 bytes (LSB first)"""
+async def write_24bit(dut, value):
+    """Write 24-bit value as 3 bytes (LSB first)"""
     await write_byte(dut, (value >>  0) & 0xFF)
     await write_byte(dut, (value >>  8) & 0xFF)
+    await write_byte(dut, (value >> 16) & 0xFF)
 
-async def read_16bit(dut):
-    """Read 16-bit value as 2 bytes (LSB first)"""
+async def read_24bit(dut):
+    """Read 24-bit value as 3 bytes (LSB first)"""
     b0 = await read_byte(dut)
     b1 = await read_byte(dut)
-    return (b1 << 8) | b0
+    b2 = await read_byte(dut)
+    return (b2 << 16) | (b1 << 8) | b0
 
-async def read_32bit(dut):
-    """Read 32-bit value as 4 bytes (LSB first) - for sincos"""
+async def read_48bit(dut):
+    """Read 48-bit value as 6 bytes (LSB first) - for sincos"""
     b0 = await read_byte(dut)
     b1 = await read_byte(dut)
     b2 = await read_byte(dut)
     b3 = await read_byte(dut)
-    return (b3 << 24) | (b2 << 16) | (b1 << 8) | b0
+    b4 = await read_byte(dut)
+    b5 = await read_byte(dut)
+    return (b5 << 40) | (b4 << 32) | (b3 << 24) | (b2 << 16) | (b1 << 8) | b0
 
 
 
@@ -94,15 +98,15 @@ async def test_wrapper_mac_multiply(dut):
     await write_byte(dut, 0x20)  # CMD_MAC_MULTIPLY
     
     # Write operands
-    await write_16bit(dut, a)
-    await write_16bit(dut, b)
+    await write_24bit(dut, a)
+    await write_24bit(dut, b)
     
     # Wait for computation
     await wait_not_busy(dut)
     
     # Read result
-    result = await read_16bit(dut)
-    result_signed = to_signed_16(result)
+    result = await read_24bit(dut)
+    result_signed = to_signed_24(result)
     
     dut._log.info(f"MAC multiply: 2 * 3 = {from_fixed(result_signed):.4f} (expected 6.0)")
     dut._log.info(f"  Raw: result={result_signed}, expected={expected}")
@@ -119,24 +123,24 @@ async def test_wrapper_mac_accumulate(dut):
     
     # First MAC: 0 + (2*3) = 6
     await write_byte(dut, 0x21)  # CMD_MAC_MAC
-    await write_16bit(dut, to_fixed(2))
-    await write_16bit(dut, to_fixed(3))
+    await write_24bit(dut, to_fixed(2))
+    await write_24bit(dut, to_fixed(3))
     await wait_not_busy(dut)
-    result1 = await read_16bit(dut)
+    result1 = await read_24bit(dut)
     
-    dut._log.info(f"MAC: 0 + (2*3) = {from_fixed(to_signed_16(result1)):.4f}")
+    dut._log.info(f"MAC: 0 + (2*3) = {from_fixed(to_signed_24(result1)):.4f}")
     
     # Second MAC: 6 + (4*5) = 26
     await write_byte(dut, 0x21)  # CMD_MAC_MAC
-    await write_16bit(dut, to_fixed(4))
-    await write_16bit(dut, to_fixed(5))
+    await write_24bit(dut, to_fixed(4))
+    await write_24bit(dut, to_fixed(5))
     await wait_not_busy(dut)
-    result2 = await read_16bit(dut)
+    result2 = await read_24bit(dut)
     
-    dut._log.info(f"MAC: 6 + (4*5) = {from_fixed(to_signed_16(result2)):.4f}")
+    dut._log.info(f"MAC: 6 + (4*5) = {from_fixed(to_signed_24(result2)):.4f}")
     
     expected = to_fixed(26)
-    assert abs(to_signed_16(result2) - expected) < 100, f"Expected {expected}, got {to_signed_16(result2)}"
+    assert abs(to_signed_24(result2) - expected) < 100, f"Expected {expected}, got {to_signed_24(result2)}"
 
 @cocotb.test()
 async def test_wrapper_mac_clear(dut):
@@ -148,10 +152,10 @@ async def test_wrapper_mac_clear(dut):
     
     # Accumulate: 0 + (2*3) = 6
     await write_byte(dut, 0x21)
-    await write_16bit(dut, to_fixed(2))
-    await write_16bit(dut, to_fixed(3))
+    await write_24bit(dut, to_fixed(2))
+    await write_24bit(dut, to_fixed(3))
     await wait_not_busy(dut)
-    await read_16bit(dut)
+    await read_24bit(dut)
     
     # Clear accumulator
     await write_byte(dut, 0x22)  # CMD_MAC_CLEAR
@@ -159,15 +163,15 @@ async def test_wrapper_mac_clear(dut):
     
     # New accumulation: 0 + (5*5) = 25
     await write_byte(dut, 0x21)
-    await write_16bit(dut, to_fixed(5))
-    await write_16bit(dut, to_fixed(5))
+    await write_24bit(dut, to_fixed(5))
+    await write_24bit(dut, to_fixed(5))
     await wait_not_busy(dut)
-    result = await read_16bit(dut)
+    result = await read_24bit(dut)
     
-    dut._log.info(f"After clear: 0 + (5*5) = {from_fixed(to_signed_16(result)):.4f}")
+    dut._log.info(f"After clear: 0 + (5*5) = {from_fixed(to_signed_24(result)):.4f}")
     
     expected = to_fixed(25)
-    assert abs(to_signed_16(result) - expected) < 100
+    assert abs(to_signed_24(result) - expected) < 100
 
 @cocotb.test()
 async def test_wrapper_cordic_sincos(dut):
@@ -178,32 +182,32 @@ async def test_wrapper_cordic_sincos(dut):
     await reset_dut(dut)
     
     # Test: sin/cos(pi/4)
-    angle = 201  # pi/4 in Q8.8 (51471 / 256)
+    angle = 3217  # pi/4 in Q12.12 (823549 / 4096)
     
     # Write command
     await write_byte(dut, 0x10)  # CMD_CORDIC_SINCOS
     
     # Write angle
-    await write_16bit(dut, angle)
+    await write_24bit(dut, angle)
     
-    # Wait for computation (CORDIC takes ~16 iterations)
+    # Wait for computation (CORDIC takes ~20 iterations)
     await wait_not_busy(dut, timeout=200)
     
-    # Read 32-bit result (sin in low 16, cos in high 16)
-    result_32 = await read_32bit(dut)
-    sin_result = to_signed_16(result_32 & 0xFFFF)
-    cos_result = to_signed_16((result_32 >> 16) & 0xFFFF)
+    # Read 48-bit result (sin in low 24, cos in high 24)
+    result_48 = await read_48bit(dut)
+    sin_result = to_signed_24(result_48 & 0xFFFFFF)
+    cos_result = to_signed_24((result_48 >> 24) & 0xFFFFFF)
     
     dut._log.info(f"CORDIC sin/cos(pi/4):")
     dut._log.info(f"  sin = {from_fixed(sin_result):.6f}")
     dut._log.info(f"  cos = {from_fixed(cos_result):.6f}")
     
     # pi/4 -> sin ≈ 0.707, cos ≈ 0.707
-    expected_sin = 181  # 0.707 in Q8.8 (46342 / 256)
-    expected_cos = 181
+    expected_sin = 2896  # 0.707 in Q12.12 (2896 / 4096)
+    expected_cos = 2896
     
-    assert abs(sin_result - expected_sin) < 10, f"Sin mismatch: {sin_result} vs {expected_sin}"
-    assert abs(cos_result - expected_cos) < 10, f"Cos mismatch: {cos_result} vs {expected_cos}"
+    assert abs(sin_result - expected_sin) < 160, f"Sin mismatch: {sin_result} vs {expected_sin}"
+    assert abs(cos_result - expected_cos) < 160, f"Cos mismatch: {cos_result} vs {expected_cos}"
 
 @cocotb.test()
 async def test_wrapper_cordic_atan2(dut):
@@ -218,18 +222,18 @@ async def test_wrapper_cordic_atan2(dut):
     x = to_fixed(1)
     
     await write_byte(dut, 0x11)  # CMD_CORDIC_ATAN2
-    await write_16bit(dut, y)
-    await write_16bit(dut, x)
+    await write_24bit(dut, y)
+    await write_24bit(dut, x)
     
     await wait_not_busy(dut, timeout=200)
     
-    result = await read_16bit(dut)
-    result_signed = to_signed_16(result)
+    result = await read_24bit(dut)
+    result_signed = to_signed_24(result)
     
     dut._log.info(f"CORDIC atan2(1,1) = {from_fixed(result_signed):.6f} rad")
     
-    expected = 201  # pi/4 in Q8.8 (51469 / 256)
-    assert abs(result_signed - expected) < 10
+    expected = 3217  # pi/4 in Q12.12 (823551 / 4096)
+    assert abs(result_signed - expected) < 160
 
 @cocotb.test()
 async def test_wrapper_reset(dut):
