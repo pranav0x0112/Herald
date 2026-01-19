@@ -25,9 +25,9 @@ Fixed-point DSP coprocessor for MCUs with no FPU. Hardware CORDIC and MAC units 
 
 ## Status
 
-[x] RTL verified (Bluespec + cocotb)  
-[x] GDS signoff clean (IHP SG13G2 130nm)  
-[x] Timing: ~6ns worst-case setup slack @ 50MHz  
-[x] Routing: 0 overflow
+- [x] RTL verified (Bluespec + cocotb)  
+- [x] GDS signoff clean (IHP SG13G2 130nm)  
+- [x] Timing: ~6ns worst-case setup slack @ 50MHz  
+- [x] Routing: 0 overflow
 
 Full documentation coming soon :)
