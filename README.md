@@ -1,49 +1,33 @@
-# Herald: Arduino Math Coprocessor
+# Herald
 
-## The Problem
+Fixed-point DSP coprocessor for MCUs with no FPU. Hardware CORDIC and MAC units in Q12.12 format.
 
-Arduino is some of the most popular choice of beginner embedded systems for millions of makers, students, and hobbyists worldwide. But there's a painful bottleneck: **math performance**.
+## Architecture
 
-The Arduino Uno's ATmega328P is an 8-bit AVR microcontroller from 2005 with no floating-point unit. Common mathematical operations that modern applications need are brutally slow.
+- **Format:** Q12.12 (24-bit: 12 integer, 12 fractional)
+- **Clock:** 50 MHz
+- **Area:** ~80k µm² (62.9% utilization)
+- **Interface:** 8-bit parallel wrapper (TinyTapeout)
 
-The result? Projects that should work don't and learning hits artificial limits.
+## Features
 
-## The Solution: Herald
+### CORDIC Engine
+- `sin(θ)`, `cos(θ)` - simultaneous
+- `atan2(y, x)` - angle computation
+- `sqrt_magnitude(x, y)` - vector length
+- `normalize(x, y)` - returns (x, y, magnitude)
 
-Herald is a custom silicon math accelerator designed to plug into Arduino and handle the heavy numerical lifting. Think of it as a dedicated math brain that Arduino can offload to.
+### MAC Unit
+- `multiply(a, b)` - Q12.12 multiplication
+- `mac(a, b)` - multiply-accumulate (acc += a×b)
+- `msu(a, b)` - multiply-subtract (acc -= a×b)
+- `clear()` - reset accumulator
 
-**Architecture:**
-- Arduino sends operation code + data over SPI
-- Herald computes in hardware (CORDIC + MAC units)
+## Status
 
+[x] RTL verified (Bluespec + cocotb)  
+[x] GDS signoff clean (IHP SG13G2 130nm)  
+[x] Timing: ~6ns worst-case setup slack @ 50MHz  
+[x] Routing: 0 overflow
 
-## What Herald Implements
-
-### Tile 1: CORDIC Engine
-A configurable CORDIC (Coordinate Rotation Digital Computer) core that implements:
-
-**Trigonometric operations:**
-- `sin(θ)`, `cos(θ)` - simultaneous computation
-- `tan(θ)`
-- `atan(x)`, `atan2(y, x)`
-
-**Hyperbolic functions:**
-- `sinh(x)`, `cosh(x)`, `tanh(x)`
-
-**Vector operations:**
-- `sqrt(x)` - square root
-- `magnitude(x, y)` - vector length: √(x² + y²)
-- Cartesian <-> Polar conversion
-
-**Bonus:**
-- Fast multiply (as a CORDIC mode)
-
-### Tile 2: MAC Unit + Interface
-**Fast Multiply-Accumulate:**
-- `MAC(a, b, c)` -> `a × b + c`
-- Enables: dot products, convolution, FIR/IIR filtering
-
-**Communication & Control:**
-- SPI interface for Arduino communication
-- Command decoder for operation selection
-- Result buffering
+Full documentation coming soon :)
