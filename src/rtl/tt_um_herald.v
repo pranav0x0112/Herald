@@ -28,31 +28,34 @@ module tt_um_herald (
   localparam RESULT_READY  = 3'd5;
   
   // Command codes
-  localparam CMD_CORDIC_SINCOS = 8'h10;
-  localparam CMD_CORDIC_ATAN2  = 8'h11;
-  localparam CMD_CORDIC_SQRT   = 8'h12;
-  localparam CMD_MAC_MULTIPLY  = 8'h20;
-  localparam CMD_MAC_MAC       = 8'h21;
-  localparam CMD_MAC_CLEAR     = 8'h22;
+  localparam CMD_CORDIC_SINCOS    = 8'h10;
+  localparam CMD_CORDIC_ATAN2     = 8'h11;
+  localparam CMD_CORDIC_SQRT      = 8'h12;
+  localparam CMD_CORDIC_NORMALIZE = 8'h13;
+  localparam CMD_MAC_MULTIPLY     = 8'h20;
+  localparam CMD_MAC_MAC          = 8'h21;
+  localparam CMD_MAC_CLEAR        = 8'h22;
+  localparam CMD_MAC_MSU          = 8'h23;
   
   // Registers
   reg [2:0] state, next_state;
   reg [7:0] cmd_reg;
   reg [23:0] operand_a, operand_b;  // 24-bit operands (Q12.12)
-  reg [47:0] result_reg;             // 48-bit for sin/cos results (2x 24-bit)
-  reg [2:0] byte_counter;            // 3 bytes per 24-bit operand
+  reg [71:0] result_reg;             // 72-bit for normalize (3x 24-bit), also holds 48-bit sin/cos
+  reg [3:0] byte_counter;            // Up to 9 bytes for normalize result
   reg wr_prev, rd_prev;
   reg [1:0] exec_phase;  // 0=start, 1=wait_busy, 2=get_result
   
   // CORDIC wires - 24-bit operands
   wire [47:0] cordic_sin_cos;  // 2x 24-bit packed
+  wire [71:0] cordic_normalize_result;  // 3x 24-bit packed (x, y, magnitude)
   wire [23:0] cordic_atan2_result, cordic_sqrt_result;
-  wire cordic_rdy_sin_cos, cordic_rdy_atan2, cordic_rdy_sqrt;
-  wire cordic_rdy_get_sin_cos, cordic_rdy_get_atan2, cordic_rdy_get_sqrt;
+  wire cordic_rdy_sin_cos, cordic_rdy_atan2, cordic_rdy_sqrt, cordic_rdy_normalize;
+  wire cordic_rdy_get_sin_cos, cordic_rdy_get_atan2, cordic_rdy_get_sqrt, cordic_rdy_get_normalize;
   wire cordic_busy, cordic_rdy_busy;
   
-  reg cordic_en_sin_cos, cordic_en_atan2, cordic_en_sqrt;
-  reg cordic_en_get_sin_cos, cordic_en_get_atan2, cordic_en_get_sqrt;
+  reg cordic_en_sin_cos, cordic_en_atan2, cordic_en_sqrt, cordic_en_normalize;
+  reg cordic_en_get_sin_cos, cordic_en_get_atan2, cordic_en_get_sqrt, cordic_en_get_normalize;
   
   // CORDIC instance (HighLevel interface)
   mkCORDICHighLevel cordic_inst (
@@ -69,6 +72,10 @@ module tt_um_herald (
     .sqrt_magnitude_y(operand_b),
     .EN_sqrt_magnitude(cordic_en_sqrt),
     .RDY_sqrt_magnitude(cordic_rdy_sqrt),
+    .normalize_x(operand_a),
+    .normalize_y(operand_b),
+    .EN_normalize(cordic_en_normalize),
+    .RDY_normalize(cordic_rdy_normalize),
     .EN_get_sin_cos(cordic_en_get_sin_cos),
     .get_sin_cos(cordic_sin_cos),
     .RDY_get_sin_cos(cordic_rdy_get_sin_cos),
@@ -78,18 +85,23 @@ module tt_um_herald (
     .EN_get_sqrt(cordic_en_get_sqrt),
     .get_sqrt(cordic_sqrt_result),
     .RDY_get_sqrt(cordic_rdy_get_sqrt),
+    .EN_get_normalize(cordic_en_get_normalize),
+    .get_normalize(cordic_normalize_result),
+    .RDY_get_normalize(cordic_rdy_get_normalize),
     .busy(cordic_busy),
     .RDY_busy(cordic_rdy_busy)
   );
   
   // MAC wires - 24-bit operands
-  wire [23:0] mac_multiply_result, mac_mac_result;
+  wire [23:0] mac_multiply_result, mac_mac_result, mac_msu_result;
   wire mac_rdy_multiply, mac_rdy_get_multiply;
   wire mac_rdy_mac, mac_rdy_get_mac;
+  wire mac_rdy_msu, mac_rdy_get_msu;
   wire mac_rdy_clear, mac_busy, mac_rdy_busy;
   
   reg mac_en_multiply, mac_en_get_multiply;
   reg mac_en_mac, mac_en_get_mac;
+  reg mac_en_msu, mac_en_get_msu;
   reg mac_en_clear;
   
   // MAC instance
@@ -110,6 +122,13 @@ module tt_um_herald (
     .EN_get_mac(mac_en_get_mac),
     .get_mac(mac_mac_result),
     .RDY_get_mac(mac_rdy_get_mac),
+    .msu_a(operand_a),
+    .msu_b(operand_b),
+    .EN_msu(mac_en_msu),
+    .RDY_msu(mac_rdy_msu),
+    .EN_get_msu(mac_en_get_msu),
+    .get_msu(mac_msu_result),
+    .RDY_get_msu(mac_rdy_get_msu),
     .EN_clear_accumulator(mac_en_clear),
     .RDY_clear_accumulator(mac_rdy_clear),
     .busy(mac_busy),
@@ -127,8 +146,8 @@ module tt_um_herald (
       cmd_reg <= 8'h00;
       operand_a <= 24'h000000;
       operand_b <= 24'h000000;
-      result_reg <= 48'h000000000000;
-      byte_counter <= 3'd0;
+      result_reg <= 72'h000000000000000000;
+      byte_counter <= 4'd0;
       wr_prev <= 1'b0;
       rd_prev <= 1'b0;
       uo_out <= 8'h00;
@@ -138,13 +157,17 @@ module tt_um_herald (
       cordic_en_sin_cos <= 1'b0;
       cordic_en_atan2 <= 1'b0;
       cordic_en_sqrt <= 1'b0;
+      cordic_en_normalize <= 1'b0;
       cordic_en_get_sin_cos <= 1'b0;
       cordic_en_get_atan2 <= 1'b0;
       cordic_en_get_sqrt <= 1'b0;
+      cordic_en_get_normalize <= 1'b0;
       mac_en_multiply <= 1'b0;
       mac_en_get_multiply <= 1'b0;
       mac_en_mac <= 1'b0;
       mac_en_get_mac <= 1'b0;
+      mac_en_msu <= 1'b0;
+      mac_en_get_msu <= 1'b0;
       mac_en_clear <= 1'b0;
     end else begin
       wr_prev <= wr_strobe;
@@ -154,19 +177,23 @@ module tt_um_herald (
       cordic_en_sin_cos <= 1'b0;
       cordic_en_atan2 <= 1'b0;
       cordic_en_sqrt <= 1'b0;
+      cordic_en_normalize <= 1'b0;
       cordic_en_get_sin_cos <= 1'b0;
       cordic_en_get_atan2 <= 1'b0;
       cordic_en_get_sqrt <= 1'b0;
+      cordic_en_get_normalize <= 1'b0;
       mac_en_multiply <= 1'b0;
       mac_en_get_multiply <= 1'b0;
       mac_en_mac <= 1'b0;
       mac_en_get_mac <= 1'b0;
+      mac_en_msu <= 1'b0;
+      mac_en_get_msu <= 1'b0;
       mac_en_clear <= 1'b0;
       
       case (state)
         IDLE: begin
           uo_out <= 8'h00;  // BUSY=0
-          byte_counter <= 3'd0;
+          byte_counter <= 4'd0;
           if (wr_edge) begin
             cmd_reg <= ui_in;
             state <= CMD_WRITE;
@@ -182,22 +209,23 @@ module tt_um_herald (
           end else if (wr_edge) begin
             // Start collecting operand A (LSB first, 24-bit = 3 bytes)
             operand_a[7:0] <= ui_in;
-            byte_counter <= 3'd1;
+            byte_counter <= 4'd1;
             state <= DATA_WRITE_A;
           end
         end
         
         DATA_WRITE_A: begin
           if (wr_edge) begin
-            if (byte_counter == 3'd1) begin
+            if (byte_counter == 4'd1) begin
               operand_a[15:8] <= ui_in;
-            end else if (byte_counter == 3'd2) begin
+            end else if (byte_counter == 4'd2) begin
               operand_a[23:16] <= ui_in;
             end
             
-            if (byte_counter == 3'd2) begin
+            if (byte_counter == 4'd2) begin
               // Check if command needs second operand
               if (cmd_reg == CMD_CORDIC_ATAN2 || cmd_reg == CMD_CORDIC_SQRT ||
+                  cmd_reg == CMD_CORDIC_NORMALIZE ||
                   cmd_reg == CMD_MAC_MULTIPLY || cmd_reg == CMD_MAC_MAC) begin
                 byte_counter <= 3'd0;
                 state <= DATA_WRITE_B;
@@ -213,15 +241,15 @@ module tt_um_herald (
         
         DATA_WRITE_B: begin
           if (wr_edge) begin
-            if (byte_counter == 3'd0) begin
+            if (byte_counter == 4'd0) begin
               operand_b[7:0] <= ui_in;
-            end else if (byte_counter == 3'd1) begin
+            end else if (byte_counter == 4'd1) begin
               operand_b[15:8] <= ui_in;
-            end else if (byte_counter == 3'd2) begin
+            end else if (byte_counter == 4'd2) begin
               operand_b[23:16] <= ui_in;
             end
             
-            if (byte_counter == 3'd2) begin
+            if (byte_counter == 4'd2) begin
               state <= EXECUTE;
               exec_phase <= 2'd0;
             end else begin
@@ -277,7 +305,23 @@ module tt_um_herald (
                 cordic_en_get_sqrt <= 1'b1;
                 if (cordic_rdy_get_sqrt) begin
                   result_reg[23:0] <= cordic_sqrt_result;  // 24-bit result
-                  byte_counter <= 3'd0;
+                  byte_counter <= 4'd0;
+                  state <= RESULT_READY;
+                end
+              end
+            end
+            
+            CMD_CORDIC_NORMALIZE: begin
+              if (exec_phase == 2'd0) begin
+                cordic_en_normalize <= 1'b1;
+                exec_phase <= 2'd1;
+              end else if (exec_phase == 2'd1) begin
+                if (!cordic_busy) exec_phase <= 2'd2;
+              end else if (exec_phase == 2'd2) begin
+                cordic_en_get_normalize <= 1'b1;
+                if (cordic_rdy_get_normalize) begin
+                  result_reg[71:0] <= cordic_normalize_result;  // 72-bit result (3x 24-bit)
+                  byte_counter <= 4'd0;
                   state <= RESULT_READY;
                 end
               end
@@ -293,7 +337,7 @@ module tt_um_herald (
                 mac_en_get_multiply <= 1'b1;
                 if (mac_rdy_get_multiply) begin
                   result_reg[23:0] <= mac_multiply_result;  // 24-bit result
-                  byte_counter <= 3'd0;
+                  byte_counter <= 4'd0;
                   state <= RESULT_READY;
                 end
               end
@@ -309,7 +353,23 @@ module tt_um_herald (
                 mac_en_get_mac <= 1'b1;
                 if (mac_rdy_get_mac) begin
                   result_reg[23:0] <= mac_mac_result;  // 24-bit result
-                  byte_counter <= 3'd0;
+                  byte_counter <= 4'd0;
+                  state <= RESULT_READY;
+                end
+              end
+            end
+            
+            CMD_MAC_MSU: begin
+              if (exec_phase == 2'd0) begin
+                mac_en_msu <= 1'b1;
+                exec_phase <= 2'd1;
+              end else if (exec_phase == 2'd1) begin
+                if (!mac_busy) exec_phase <= 2'd2;
+              end else if (exec_phase == 2'd2) begin
+                mac_en_get_msu <= 1'b1;
+                if (mac_rdy_get_msu) begin
+                  result_reg[23:0] <= mac_msu_result;  // 24-bit result
+                  byte_counter <= 4'd0;
                   state <= RESULT_READY;
                 end
               end
@@ -335,19 +395,23 @@ module tt_um_herald (
           if (rd_edge) begin
             // Output result bytes on read strobe (LSB first)
             case (byte_counter)
-              3'd0: uo_out <= result_reg[7:0];
-              3'd1: uo_out <= result_reg[15:8];
-              3'd2: uo_out <= result_reg[23:16];
-              3'd3: uo_out <= result_reg[31:24];
-              3'd4: uo_out <= result_reg[39:32];
-              3'd5: uo_out <= result_reg[47:40];
+              4'd0: uo_out <= result_reg[7:0];
+              4'd1: uo_out <= result_reg[15:8];
+              4'd2: uo_out <= result_reg[23:16];
+              4'd3: uo_out <= result_reg[31:24];
+              4'd4: uo_out <= result_reg[39:32];
+              4'd5: uo_out <= result_reg[47:40];
+              4'd6: uo_out <= result_reg[55:48];
+              4'd7: uo_out <= result_reg[63:56];
+              4'd8: uo_out <= result_reg[71:64];
               default: uo_out <= 8'h00;
             endcase
             
             // Determine max bytes based on command
-            // SINCOS returns 48-bit (6 bytes), others return 24-bit (3 bytes)
-            if ((cmd_reg == CMD_CORDIC_SINCOS && byte_counter == 3'd5) ||
-                (cmd_reg != CMD_CORDIC_SINCOS && byte_counter == 3'd2)) begin
+            // NORMALIZE returns 72-bit (9 bytes), SINCOS returns 48-bit (6 bytes), others return 24-bit (3 bytes)
+            if ((cmd_reg == CMD_CORDIC_NORMALIZE && byte_counter == 4'd8) ||
+                (cmd_reg == CMD_CORDIC_SINCOS && byte_counter == 4'd5) ||
+                (cmd_reg != CMD_CORDIC_SINCOS && cmd_reg != CMD_CORDIC_NORMALIZE && byte_counter == 4'd2)) begin
               state <= IDLE;
             end else begin
               byte_counter <= byte_counter + 1;
