@@ -1,5 +1,4 @@
 // Herald CORDIC Engine
-// 32-bit iterative CORDIC for trig, hyperbolic, and vector operations
 // IHP SG13G2 130nm - Low Power Design
 
 package CORDIC;
@@ -22,7 +21,8 @@ typedef enum {
     OP_SINCOS,    
     OP_ATAN2,     
     OP_SQRT,      
-    OP_MAGNITUDE
+    OP_MAGNITUDE,
+    OP_NORMALIZE
 } CORDICOp deriving (Bits, Eq, FShow);
 
 typedef struct {
@@ -179,10 +179,12 @@ interface CORDICHighLevelIfc;
     method Action sin_cos(Fixed24 angle);
     method Action atan2(Fixed24 y, Fixed24 x);
     method Action sqrt_magnitude(Fixed24 x, Fixed24 y);
+    method Action normalize(Fixed24 x, Fixed24 y);
     
     method ActionValue#(Tuple2#(Fixed24, Fixed24)) get_sin_cos();
     method ActionValue#(Fixed24) get_atan2();
     method ActionValue#(Fixed24) get_sqrt();
+    method ActionValue#(Tuple3#(Fixed24, Fixed24, Fixed24)) get_normalize();
     
     method Bool busy();
 endinterface
@@ -193,10 +195,18 @@ module mkCORDICHighLevel(CORDICHighLevelIfc);
     Reg#(CORDICOp) current_op <- mkReg(?);
     Reg#(Bool) result_ready <- mkReg(False);
     Reg#(Bool) operation_pending <- mkReg(False);
+    Reg#(Bool) operation_started <- mkReg(False); 
+    Reg#(Fixed24) stored_x <- mkReg(0);
+    Reg#(Fixed24) stored_y <- mkReg(0);
+
+    rule track_start (operation_pending && !operation_started && cordic.busy());
+        operation_started <= True;
+    endrule
     
-    rule check_completion (operation_pending && !cordic.busy() && !result_ready);
+    rule check_completion (operation_started && !cordic.busy() && !result_ready);
         result_ready <= True;
         operation_pending <= False;
+        operation_started <= False;
     endrule
     
     method Action sin_cos(Fixed24 angle);
@@ -204,6 +214,7 @@ module mkCORDICHighLevel(CORDICHighLevelIfc);
         current_op <= OP_SINCOS;
         result_ready <= False;
         operation_pending <= True;
+        operation_started <= False;
     endmethod
     
     method Action atan2(Fixed24 y, Fixed24 x);
@@ -211,6 +222,7 @@ module mkCORDICHighLevel(CORDICHighLevelIfc);
         current_op <= OP_ATAN2;
         result_ready <= False;
         operation_pending <= True;
+        operation_started <= False;
     endmethod
     
     method Action sqrt_magnitude(Fixed24 x, Fixed24 y);
@@ -218,6 +230,17 @@ module mkCORDICHighLevel(CORDICHighLevelIfc);
         current_op <= OP_SQRT;
         result_ready <= False;
         operation_pending <= True;
+        operation_started <= False;
+    endmethod
+    
+    method Action normalize(Fixed24 x, Fixed24 y);
+        stored_x <= x;  // Store original values
+        stored_y <= y;
+        cordic.start(x, y, 0, MODE_VECTORING);
+        current_op <= OP_NORMALIZE;
+        result_ready <= False;
+        operation_pending <= True;
+        operation_started <= False;
     endmethod
     
     method ActionValue#(Tuple2#(Fixed24, Fixed24)) get_sin_cos() 
@@ -239,6 +262,13 @@ module mkCORDICHighLevel(CORDICHighLevelIfc);
         let res <- cordic.getResult();
         result_ready <= False;
         return res.x;
+    endmethod
+    
+    method ActionValue#(Tuple3#(Fixed24, Fixed24, Fixed24)) get_normalize() 
+            if (result_ready && current_op == OP_NORMALIZE);
+        let res <- cordic.getResult();
+        result_ready <= False;
+        return tuple3(stored_x, stored_y, res.x);
     endmethod
     
     method Bool busy();

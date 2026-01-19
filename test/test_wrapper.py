@@ -71,7 +71,13 @@ async def read_48bit(dut):
     b5 = await read_byte(dut)
     return (b5 << 40) | (b4 << 32) | (b3 << 24) | (b2 << 16) | (b1 << 8) | b0
 
-
+async def read_72bit(dut):
+    """Read 72-bit value as 9 bytes (LSB first) - for normalize"""
+    result = 0
+    for i in range(9):
+        byte_val = await read_byte(dut)
+        result |= (byte_val << (i * 8))
+    return result
 
 async def wait_not_busy(dut, timeout=100):
     """Wait for BUSY flag to go low"""
@@ -249,3 +255,77 @@ async def test_wrapper_reset(dut):
     
     dut._log.info(f"Status after reset: {status:02x} (BUSY={status >> 7})")
     assert (status & 0x80) == 0, "Expected BUSY=0 after reset"
+
+@cocotb.test()
+async def test_wrapper_mac_msu(dut):
+    """Test MAC MSU (multiply-subtract) operation through wrapper"""
+    clock = Clock(dut.clk, 10, unit="ns")
+    cocotb.start_soon(clock.start())
+    
+    await reset_dut(dut)
+    
+    # Clear accumulator first
+    await write_byte(dut, 0x22)  # CMD_MAC_CLEAR
+    await ClockCycles(dut.clk, 10)
+    
+    # Accumulate: 10 (clear sets to 0, so first operation adds 10)
+    await write_byte(dut, 0x21)  # CMD_MAC_MAC
+    await write_24bit(dut, to_fixed(5))
+    await write_24bit(dut, to_fixed(2))
+    await wait_not_busy(dut, timeout=50)
+    result1 = to_signed_24(await read_24bit(dut))
+    dut._log.info(f"After MAC(5,2): acc = {from_fixed(result1):.4f}")
+    assert abs(result1 - to_fixed(10)) < 100
+    
+    # MSU: acc = acc - (3 * 2) = 10 - 6 = 4
+    await write_byte(dut, 0x23)  # CMD_MAC_MSU
+    await write_24bit(dut, to_fixed(3))
+    await write_24bit(dut, to_fixed(2))
+    await wait_not_busy(dut, timeout=50)
+    result2 = to_signed_24(await read_24bit(dut))
+    
+    dut._log.info(f"After MSU(3,2): acc = {from_fixed(result2):.4f}")
+    expected = to_fixed(4)  # 10 - 6 = 4
+    
+    assert abs(result2 - expected) < 100, f"MSU failed: {from_fixed(result2):.4f} != 4.0"
+
+@cocotb.test()
+async def test_wrapper_cordic_normalize(dut):
+    """Test CORDIC normalize operation through wrapper"""
+    clock = Clock(dut.clk, 10, unit="ns")
+    cocotb.start_soon(clock.start())
+    
+    await reset_dut(dut)
+    
+    # Test: normalize(3, 4) -> returns (3, 4, magnitude=5*K)
+    x = to_fixed(3)  # 12288
+    y = to_fixed(4)  # 16384
+    
+    await write_byte(dut, 0x13)  # CMD_CORDIC_NORMALIZE
+    await write_24bit(dut, x)
+    await write_24bit(dut, y)
+    
+    await wait_not_busy(dut, timeout=250)
+    
+    # Read 72-bit result (9 bytes): x, y, magnitude
+    result = 0
+    for i in range(9):
+        byte_val = await read_byte(dut)
+        result |= (byte_val << (i * 8))
+    
+    orig_x = to_signed_24((result >> 48) & 0xFFFFFF)   # MSB
+    orig_y = to_signed_24((result >> 24) & 0xFFFFFF)   # Middle
+    mag = to_signed_24(result & 0xFFFFFF)              # LSB
+    
+    dut._log.info(f"CORDIC normalize(3, 4):")
+    dut._log.info(f"  Original X: {from_fixed(orig_x):.4f}")
+    dut._log.info(f"  Original Y: {from_fixed(orig_y):.4f}")
+    dut._log.info(f"  Magnitude:  {from_fixed(mag):.4f} (expected ~8.23)")
+    
+    # Verify original values preserved
+    assert orig_x == x, f"X mismatch: {orig_x} != {x}"
+    assert orig_y == y, f"Y mismatch: {orig_y} != {y}"
+    
+    # Magnitude should be ~33728 (5 * K * 4096 where K ≈ 1.647)
+    expected_mag = 33728
+    assert abs(mag - expected_mag) < 300, f"Magnitude mismatch: {mag} != {expected_mag}"
