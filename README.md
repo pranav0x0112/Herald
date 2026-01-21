@@ -9,6 +9,9 @@ Fixed-point DSP coprocessor for MCUs with no FPU. Hardware CORDIC and MAC units 
 - **Area:** ~80k µm² (62.9% utilization)
 - **Interface:** 8-bit parallel wrapper (TinyTapeout)
 
+> [!NOTE]
+> For more details, check this [repo.](https://github.com/pranav0x0112/ttihp26a-Herald)
+
 ## Features
 
 ### CORDIC Engine
