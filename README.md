@@ -2,6 +2,9 @@
 
 Fixed-point DSP coprocessor for MCUs with no FPU. Hardware CORDIC and MAC units in Q12.12 format.
 
+![Full GDS](/docs/images/full_gds.png)
+> Full GDS Render of TT-IHP-26a, will change as more designs get added!
+
 ## Architecture
 
 - **Format:** Q12.12 (24-bit: 12 integer, 12 fractional)
